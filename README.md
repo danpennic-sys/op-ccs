@@ -6,6 +6,8 @@ Deterministic. Evidence-producing. Forced reduction sequence once load threshold
 
 **PROOF NOT PROMISE.**
 
+**License:** MIT OR Apache-2.0 (dual). See [LICENSE](LICENSE).
+
 ## Purpose
 
 When observable metrics cross threshold, the module forces the locked sequence:
