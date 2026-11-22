@@ -3,7 +3,8 @@
 **Status:** Locked from Operator Desk Field Manual / Field Card records  
 **Date locked:** 2026-11-09  
 **Source:** Approved sequence and Field Card Draft 0.1  
-**Disclaimer:** PROOF NOT PROMISE
+**Disclaimer:** PROOF NOT PROMISE  
+**License:** MIT OR Apache-2.0 (dual)
 
 ## Approved Sequence
 
@@ -34,3 +35,5 @@ All later steps (SET, ACT, VERIFY, RECORD) are invalid unless a SEE evidence rec
 
 This file is the protocol source for the SEE step inside `op-ccs`.  
 Implementation must match this boundary. Expansion requires a new approved Field Manual or Field Card revision.
+
+Dual licensed under MIT OR Apache-2.0.
