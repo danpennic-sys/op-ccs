@@ -24,6 +24,15 @@ See `module.go` for the locked contract.
 
 ## Status
 
-Skeleton. Thresholds and metric definitions are versioned configuration (not yet implemented).
+Skeleton with test vectors.
+
+- `impl.go`: minimal StubModule (threshold hard-coded for tests only)
+- `module_test.go`: below-threshold pass-through, above-threshold ABORT, determinism check
+
+Thresholds and metric definitions must become versioned configuration before any production use.
 
 Aligned with Operator Desk sequence: SEE → SET → ACT → VERIFY → RECORD → REPEAT.
+
+```bash
+go test ./...
+```
