@@ -8,15 +8,15 @@ Deterministic. Evidence-producing. Forced reduction sequence once load threshold
 
 ## Purpose
 
-When observable metrics cross threshold, the module forces:
+When observable metrics cross threshold, the module forces the locked sequence:
 
-1. SEE — record current metrics and constraints
-2. SET — strip to minimal next action inside locked sequences
-3. ACT | DEFER | ABORT — one choice only, recorded
-4. VERIFY — confirm constraints and no open generation
-5. RECORD — emit evidence pack
+SEE → SET → ACT → VERIFY → RECORD → REPEAT
 
 Any further output without a new pack is invalid.
+
+## Protocol source
+
+SEE step definition and Field Manual / Field Card lock: [`docs/SEE-PROTOCOL.md`](docs/SEE-PROTOCOL.md)
 
 ## Interface
 
@@ -30,8 +30,6 @@ Skeleton with test vectors.
 - `module_test.go`: below-threshold pass-through, above-threshold ABORT, determinism check
 
 Thresholds and metric definitions must become versioned configuration before any production use.
-
-Aligned with Operator Desk sequence: SEE → SET → ACT → VERIFY → RECORD → REPEAT.
 
 ```bash
 go test ./...
