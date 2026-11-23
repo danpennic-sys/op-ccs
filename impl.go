@@ -9,6 +9,8 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"sort"
+	"strings"
 	"time"
 )
 
@@ -20,7 +22,8 @@ var (
 )
 
 // StubModule is a minimal deterministic implementation for test vectors.
-// Thresholds are hard-coded here only for the skeleton; production must load versioned config.
+// Threshold zero means missing config (never legitimate).
+// Hash is over canonical step|sorted-context|outcome; no wall-clock or map order in the digest.
 type StubModule struct {
 	Threshold float64
 	assessed  bool
@@ -32,6 +35,9 @@ func NewStub() *StubModule {
 }
 
 func (m *StubModule) Assess(signal CollapseSignal) (SurvivalAction, error) {
+	if m.assessed {
+		return SurvivalAction{}, ErrOutOfOrder
+	}
 	if signal.ContextHash == "" || len(signal.Metrics) == 0 {
 		return SurvivalAction{}, ErrMalformedInput
 	}
@@ -45,7 +51,7 @@ func (m *StubModule) Assess(signal CollapseSignal) (SurvivalAction, error) {
 	}
 
 	action := SurvivalAction{
-		ActionID:  fmt.Sprintf("act-%d", signal.Timestamp.UnixNano()),
+		ActionID:  "act-fixed", // fixed for determinism; production uses versioned id
 		ExpiresAt: signal.Timestamp.Add(5 * time.Minute),
 	}
 
@@ -62,6 +68,13 @@ func (m *StubModule) Assess(signal CollapseSignal) (SurvivalAction, error) {
 	return action, nil
 }
 
+func canonicalHash(step, context string, outcome []byte) string {
+	parts := []string{step, context}
+	sort.Strings(parts)
+	h := sha256.Sum256([]byte(strings.Join(parts, "|") + "|" + string(outcome)))
+	return hex.EncodeToString(h[:])
+}
+
 func (m *StubModule) Record(action SurvivalAction, outcome []byte) (EvidencePack, error) {
 	if !m.assessed {
 		return EvidencePack{}, ErrOutOfOrder
@@ -70,12 +83,12 @@ func (m *StubModule) Record(action SurvivalAction, outcome []byte) (EvidencePack
 		return EvidencePack{}, ErrMalformedInput
 	}
 
-	h := sha256.Sum256(append([]byte(action.Step), outcome...))
+	hash := canonicalHash(action.Step, "stub-context", outcome)
 	pack := EvidencePack{
 		SignalHash:  "stub-signal",
 		Actions:     []SurvivalAction{action},
-		OutcomeHash: hex.EncodeToString(h[:]),
-		Chain:       h[:],
+		OutcomeHash: hash,
+		Chain:       []byte(hash),
 	}
 	m.recorded = true
 	return pack, nil
@@ -89,8 +102,8 @@ func (m *StubModule) Replay(pack EvidencePack) (bool, error) {
 		return false, ErrMalformedInput
 	}
 	action := pack.Actions[0]
-	h := sha256.Sum256(append([]byte(action.Step), []byte("ok")...))
-	if hex.EncodeToString(h[:]) != pack.OutcomeHash {
+	expected := canonicalHash(action.Step, "stub-context", []byte("ok"))
+	if expected != pack.OutcomeHash || string(pack.Chain) != pack.OutcomeHash {
 		return false, ErrTampered
 	}
 	return true, nil
