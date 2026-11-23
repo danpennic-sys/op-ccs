@@ -6,6 +6,7 @@ package ccs
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"strings"
 	"testing"
@@ -28,6 +29,14 @@ type Case struct {
 	ExpectOutcomeHash   string  `json:"expect_outcome_hash,omitempty"`
 }
 
+// Sentinel map for exact errors.Is matching.
+var errSentinels = map[string]error{
+	"ErrOutOfOrder":     ErrOutOfOrder,
+	"ErrMalformedInput": ErrMalformedInput,
+	"ErrMissingConfig":  ErrMissingConfig,
+	"ErrTampered":       ErrTampered,
+}
+
 func loadCases(t *testing.T) []Case {
 	t.Helper()
 	data, err := os.ReadFile("testdata/vectors.json")
@@ -41,6 +50,8 @@ func loadCases(t *testing.T) []Case {
 	return vf.Cases
 }
 
+// Baseline uses float64. Documented encoding for other implementations:
+// JSON number 0.3 (IEEE 754 double). Hash is over canonical step|context|outcome bytes only.
 func baselineSignal() CollapseSignal {
 	return CollapseSignal{
 		Timestamp:   time.Date(2026, 11, 22, 16, 0, 0, 0, time.UTC),
@@ -51,6 +62,24 @@ func baselineSignal() CollapseSignal {
 
 func baselineOutcome() []byte {
 	return []byte("ok")
+}
+
+func checkErr(t *testing.T, got error, expect *string) {
+	t.Helper()
+	if expect == nil {
+		if got != nil {
+			t.Fatalf("expected nil, got %v", got)
+		}
+		return
+	}
+	name := *expect
+	sentinel, ok := errSentinels[name]
+	if !ok {
+		t.Fatalf("unknown expect_err name in JSON: %q", name)
+	}
+	if !errors.Is(got, sentinel) {
+		t.Fatalf("expected %s, got %v", name, got)
+	}
 }
 
 func TestVectors(t *testing.T) {
@@ -76,15 +105,10 @@ func TestVectors(t *testing.T) {
 						_, lastErr = m.Replay(EvidencePack{})
 					}
 				}
-				if c.ExpectErr != nil {
-					if lastErr == nil || !strings.Contains(lastErr.Error(), strings.TrimPrefix(*c.ExpectErr, "Err")) {
-						t.Fatalf("expected error containing %q, got %v", *c.ExpectErr, lastErr)
-					}
-				}
+				checkErr(t, lastErr, c.ExpectErr)
 				return
 
 			default:
-				// Normal Assess -> Record path, then mutate, then Replay
 				action, err := m.Assess(signal)
 				if err != nil {
 					t.Fatal(err)
@@ -94,7 +118,6 @@ func TestVectors(t *testing.T) {
 					t.Fatal(err)
 				}
 
-				// Apply mutation
 				switch c.Mutation {
 				case "mutate_input":
 					pack.Actions[0].Payload = []byte("tampered")
@@ -136,27 +159,17 @@ func TestVectors(t *testing.T) {
 					return
 				}
 
-				if c.ExpectOutcomeHash != "" && c.ExpectOutcomeHash != "REPLACE_WITH_PINNED_HASH" {
+				if c.ExpectOutcomeHash != "" {
+					if c.ExpectOutcomeHash == "REPLACE_WITH_PINNED_HASH" {
+						t.Fatalf("placeholder hash still present; actual outcome hash is: %s", pack.OutcomeHash)
+					}
 					if pack.OutcomeHash != c.ExpectOutcomeHash {
 						t.Fatalf("outcome hash mismatch: got %s, want %s", pack.OutcomeHash, c.ExpectOutcomeHash)
 					}
 				}
 
 				_, err = m.Replay(pack)
-				if c.ExpectErr == nil {
-					if err != nil {
-						t.Fatalf("unexpected error: %v", err)
-					}
-				} else {
-					want := *c.ExpectErr
-					if err == nil {
-						t.Fatalf("expected %s, got nil", want)
-					}
-					// Match by error string fragment or name
-					if !strings.Contains(err.Error(), strings.TrimPrefix(want, "Err")) && err.Error() != want {
-						t.Fatalf("expected error %q, got %v", want, err)
-					}
-				}
+				checkErr(t, err, c.ExpectErr)
 			}
 		})
 	}
