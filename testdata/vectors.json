@@ -1,152 +1,19 @@
-[
-  {
-    "name": "forced-sequence-record-before-assess",
-    "description": "Record before Assess must fail with ErrOutOfOrder",
-    "input": {
-      "action": {"step": "ACT", "payload": "dGVzdA=="},
-      "outcome": "ok"
-    },
-    "expected_error": "out of order: required prior step missing"
-  },
-  {
-    "name": "forced-sequence-replay-before-record",
-    "description": "Replay before Record must fail with ErrOutOfOrder",
-    "input": {
-      "pack": {"actions": [], "outcome_hash": ""}
-    },
-    "expected_error": "out of order: required prior step missing"
-  },
-  {
-    "name": "forced-sequence-assess-twice",
-    "description": "Second Assess after first must fail with ErrOutOfOrder",
-    "input": {
-      "signal": {
-        "timestamp": "2026-11-22T16:00:00Z",
-        "metrics": {"load": 0.3},
-        "context_hash": "fixed-ctx"
-      }
-    },
-    "expected_error": "out of order: required prior step missing"
-  },
-  {
-    "name": "forced-sequence-replay-after-failed-record",
-    "description": "Replay after a failed Record must fail",
-    "input": {
-      "signal": {
-        "timestamp": "2026-11-22T16:00:00Z",
-        "metrics": {"load": 0.3},
-        "context_hash": "fixed-ctx"
-      }
-    },
-    "expected_error": "out of order: required prior step missing"
-  },
-  {
-    "name": "replay-determinism",
-    "description": "Same recorded input yields byte-identical result; hash pinned",
-    "input": {
-      "signal": {
-        "timestamp": "2026-11-22T16:00:00Z",
-        "metrics": {"load": 0.3},
-        "context_hash": "fixed-ctx"
-      },
-      "outcome": "ok"
-    },
-    "expected": {
-      "step": "ACT",
-      "outcome_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-    }
-  },
-  {
-    "name": "boundary-empty-metrics",
-    "description": "Empty metrics fail closed",
-    "input": {
-      "signal": {
-        "timestamp": "2026-11-22T16:00:00Z",
-        "metrics": {},
-        "context_hash": "ctx"
-      }
-    },
-    "expected_error": "malformed or empty input"
-  },
-  {
-    "name": "boundary-empty-context",
-    "description": "Empty context hash fail closed",
-    "input": {
-      "signal": {
-        "timestamp": "2026-11-22T16:00:00Z",
-        "metrics": {"load": 0.5},
-        "context_hash": ""
-      }
-    },
-    "expected_error": "malformed or empty input"
-  },
-  {
-    "name": "boundary-missing-config",
-    "description": "Zero threshold means missing config (document: zero is never legitimate)",
-    "input": {
-      "signal": {
-        "timestamp": "2026-11-22T16:00:00Z",
-        "metrics": {"load": 0.5},
-        "context_hash": "ctx"
-      },
-      "zero_threshold": true
-    },
-    "expected_error": "missing configuration"
-  },
-  {
-    "name": "tamper-modified-outcome-hash",
-    "description": "Modified outcome hash makes Replay fail",
-    "input": {
-      "signal": {
-        "timestamp": "2026-11-22T16:00:00Z",
-        "metrics": {"load": 0.3},
-        "context_hash": "ctx"
-      },
-      "outcome": "ok",
-      "tamper": "outcome_hash"
-    },
-    "expected_error": "tampered record"
-  },
-  {
-    "name": "tamper-modified-context",
-    "description": "Modified context after Record makes Replay fail",
-    "input": {
-      "signal": {
-        "timestamp": "2026-11-22T16:00:00Z",
-        "metrics": {"load": 0.3},
-        "context_hash": "ctx"
-      },
-      "outcome": "ok",
-      "tamper": "context"
-    },
-    "expected_error": "tampered record"
-  },
-  {
-    "name": "tamper-truncated-chain",
-    "description": "Truncated chain makes Replay fail",
-    "input": {
-      "signal": {
-        "timestamp": "2026-11-22T16:00:00Z",
-        "metrics": {"load": 0.3},
-        "context_hash": "ctx"
-      },
-      "outcome": "ok",
-      "tamper": "truncate"
-    },
-    "expected_error": "tampered record"
-  },
-  {
-    "name": "tamper-dropped-field",
-    "description": "Dropped field makes Replay fail",
-    "input": {
-      "signal": {
-        "timestamp": "2026-11-22T16:00:00Z",
-        "metrics": {"load": 0.3},
-        "context_hash": "ctx"
-      },
-      "outcome": "ok",
-      "tamper": "drop"
-    },
-    "expected_error": "tampered record"
-  }
-]
+{
+  "_license": "MIT OR Apache-2.0",
+  "_copyright": "Operator Pages LLC",
+  "_date": "2026-11-22",
+  "_note": "Abstract vectors only. No thresholds or metric definitions. Each case runs Assess -> Record on a valid baseline fixture, applies 'mutation' to the recorded artifact (or call order), then runs Replay.",
+  "cases": [
+    {"name": "mutate_input_after_record",   "mutation": "mutate_input",        "expect_err": "ErrTampered"},
+    {"name": "mutate_context_after_record", "mutation": "mutate_context",      "expect_err": "ErrTampered"},
+    {"name": "flip_bit_in_outcome_hash",    "mutation": "flip_outcome_hash",   "expect_err": "ErrTampered"},
+    {"name": "truncate_record_half",        "mutation": "truncate_half",       "expect_err": "ErrMalformedInput"},
+    {"name": "drop_field_input",            "mutation": "drop_field:input",    "expect_err": "ErrMalformedInput"},
+    {"name": "drop_field_context",          "mutation": "drop_field:context",  "expect_err": "ErrMalformedInput"},
+    {"name": "drop_field_outcome_hash",     "mutation": "drop_field:outcome_hash", "expect_err": "ErrMalformedInput"},
+    {"name": "assess_called_twice",         "mutation": "call_order:assess,assess", "expect_err": "ErrOutOfOrder"},
+    {"name": "replay_after_failed_record",  "mutation": "call_order:assess,record_fail,replay", "expect_err": "ErrOutOfOrder"},
+    {"name": "replay_twice_identical",      "mutation": "none", "expect_err": null, "expect_identical_runs": 2},
+    {"name": "replay_matches_pinned_hash",  "mutation": "none", "expect_err": null, "expect_outcome_hash": "REPLACE_WITH_PINNED_HASH"}
+  ]
+}
