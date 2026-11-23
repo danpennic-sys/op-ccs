@@ -23,7 +23,8 @@ var (
 
 // StubModule is a minimal deterministic implementation for test vectors.
 // Threshold zero means missing config (never legitimate).
-// Hash is over canonical step|sorted-context|outcome; no wall-clock or map order in the digest.
+// Hash covers step | context | input-payload | outcome (canonical, sorted, no wall-clock).
+// Input is included so mutate_input after Record is detected as tamper.
 type StubModule struct {
 	Threshold float64
 	assessed  bool
@@ -68,10 +69,11 @@ func (m *StubModule) Assess(signal CollapseSignal) (SurvivalAction, error) {
 	return action, nil
 }
 
-func canonicalHash(step, context string, outcome []byte) string {
-	parts := []string{step, context}
+// canonicalHash includes the input payload so that mutations to recorded input are detected.
+func canonicalHash(step, context string, input, outcome []byte) string {
+	parts := []string{step, context, string(input), string(outcome)}
 	sort.Strings(parts)
-	h := sha256.Sum256([]byte(strings.Join(parts, "|") + "|" + string(outcome)))
+	h := sha256.Sum256([]byte(strings.Join(parts, "|")))
 	return hex.EncodeToString(h[:])
 }
 
@@ -83,7 +85,7 @@ func (m *StubModule) Record(action SurvivalAction, outcome []byte) (EvidencePack
 		return EvidencePack{}, ErrMalformedInput
 	}
 
-	hash := canonicalHash(action.Step, "stub-context", outcome)
+	hash := canonicalHash(action.Step, "stub-context", action.Payload, outcome)
 	pack := EvidencePack{
 		SignalHash:  "stub-signal",
 		Actions:     []SurvivalAction{action},
@@ -102,7 +104,7 @@ func (m *StubModule) Replay(pack EvidencePack) (bool, error) {
 		return false, ErrMalformedInput
 	}
 	action := pack.Actions[0]
-	expected := canonicalHash(action.Step, "stub-context", []byte("ok"))
+	expected := canonicalHash(action.Step, "stub-context", action.Payload, []byte("ok"))
 	if expected != pack.OutcomeHash || string(pack.Chain) != pack.OutcomeHash {
 		return false, ErrTampered
 	}
