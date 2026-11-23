@@ -1,0 +1,86 @@
+[
+  {
+    "name": "forced-sequence-record-before-assess",
+    "description": "Record before Assess must fail with ErrOutOfOrder",
+    "input": {
+      "action": {"step": "ACT", "payload": "dGVzdA=="},
+      "outcome": "ok"
+    },
+    "expected_error": "out of order: required prior step missing"
+  },
+  {
+    "name": "forced-sequence-replay-before-record",
+    "description": "Replay before Record must fail with ErrOutOfOrder",
+    "input": {
+      "pack": {"actions": [], "outcome_hash": ""}
+    },
+    "expected_error": "out of order: required prior step missing"
+  },
+  {
+    "name": "replay-determinism",
+    "description": "Same recorded input yields byte-identical result",
+    "input": {
+      "signal": {
+        "timestamp": "2026-11-22T16:00:00Z",
+        "metrics": {"load": 0.3},
+        "context_hash": "fixed-ctx"
+      },
+      "outcome": "ok"
+    },
+    "expected": {
+      "step": "ACT",
+      "deterministic": true
+    }
+  },
+  {
+    "name": "boundary-empty-metrics",
+    "description": "Empty metrics fail closed",
+    "input": {
+      "signal": {
+        "timestamp": "2026-11-22T16:00:00Z",
+        "metrics": {},
+        "context_hash": "ctx"
+      }
+    },
+    "expected_error": "malformed or empty input"
+  },
+  {
+    "name": "boundary-empty-context",
+    "description": "Empty context hash fail closed",
+    "input": {
+      "signal": {
+        "timestamp": "2026-11-22T16:00:00Z",
+        "metrics": {"load": 0.5},
+        "context_hash": ""
+      }
+    },
+    "expected_error": "malformed or empty input"
+  },
+  {
+    "name": "boundary-missing-config",
+    "description": "Missing configuration (zero threshold) fails closed",
+    "input": {
+      "signal": {
+        "timestamp": "2026-11-22T16:00:00Z",
+        "metrics": {"load": 0.5},
+        "context_hash": "ctx"
+      },
+      "zero_threshold": true
+    },
+    "expected_error": "missing configuration"
+  },
+  {
+    "name": "tamper-modified-outcome-hash",
+    "description": "Modified record makes Replay fail",
+    "input": {
+      "signal": {
+        "timestamp": "2026-11-22T16:00:00Z",
+        "metrics": {"load": 0.3},
+        "context_hash": "ctx"
+      },
+      "outcome": "ok",
+      "tamper": true
+    },
+    "expected_error": "tampered record"
+  }
+]
