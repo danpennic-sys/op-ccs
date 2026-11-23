@@ -7,11 +7,12 @@ package ccs
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
-	"fmt"
-	"sort"
-	"strings"
+	"math"
 	"time"
+
+	"github.com/gowebpki/jcs"
 )
 
 var (
@@ -21,10 +22,25 @@ var (
 	ErrTampered       = errors.New("tampered record")
 )
 
+// envelope is the single object hashed for tamper evidence.
+// v and domain allow future scheme changes without silent breakage.
+type envelope struct {
+	V       int             `json:"v"`
+	Domain  string          `json:"domain"`
+	Step    string          `json:"step"`
+	Input   json.RawMessage `json:"input"`
+	Context string          `json:"context"`
+	Outcome json.RawMessage `json:"outcome"`
+}
+
+const (
+	envelopeV      = 1
+	envelopeDomain = "op-ccs/v1"
+)
+
 // StubModule is a minimal deterministic implementation for test vectors.
 // Threshold zero means missing config (never legitimate).
-// Hash covers step | context | input-payload | outcome (canonical, sorted, no wall-clock).
-// Input is included so mutate_input after Record is detected as tamper.
+// Hash is SHA-256 over the JCS-canonical envelope (includes input).
 type StubModule struct {
 	Threshold float64
 	assessed  bool
@@ -44,6 +60,12 @@ func (m *StubModule) Assess(signal CollapseSignal) (SurvivalAction, error) {
 	}
 	if m.Threshold == 0 {
 		return SurvivalAction{}, ErrMissingConfig
+	}
+	// Reject non-I-JSON numbers at the boundary.
+	for _, v := range signal.Metrics {
+		if math.IsNaN(v) || math.IsInf(v, 0) {
+			return SurvivalAction{}, ErrMalformedInput
+		}
 	}
 
 	load := 0.0
@@ -69,12 +91,25 @@ func (m *StubModule) Assess(signal CollapseSignal) (SurvivalAction, error) {
 	return action, nil
 }
 
-// canonicalHash includes the input payload so that mutations to recorded input are detected.
-func canonicalHash(step, context string, input, outcome []byte) string {
-	parts := []string{step, context, string(input), string(outcome)}
-	sort.Strings(parts)
-	h := sha256.Sum256([]byte(strings.Join(parts, "|")))
-	return hex.EncodeToString(h[:])
+func canonicalHash(step string, input, outcome []byte, context string) (string, error) {
+	env := envelope{
+		V:       envelopeV,
+		Domain:  envelopeDomain,
+		Step:    step,
+		Input:   json.RawMessage(input),
+		Context: context,
+		Outcome: json.RawMessage(outcome),
+	}
+	raw, err := json.Marshal(env)
+	if err != nil {
+		return "", err
+	}
+	canon, err := jcs.Transform(raw)
+	if err != nil {
+		return "", err
+	}
+	h := sha256.Sum256(canon)
+	return hex.EncodeToString(h[:]), nil
 }
 
 func (m *StubModule) Record(action SurvivalAction, outcome []byte) (EvidencePack, error) {
@@ -85,7 +120,10 @@ func (m *StubModule) Record(action SurvivalAction, outcome []byte) (EvidencePack
 		return EvidencePack{}, ErrMalformedInput
 	}
 
-	hash := canonicalHash(action.Step, "stub-context", action.Payload, outcome)
+	hash, err := canonicalHash(action.Step, action.Payload, outcome, "stub-context")
+	if err != nil {
+		return EvidencePack{}, ErrMalformedInput
+	}
 	pack := EvidencePack{
 		SignalHash:  "stub-signal",
 		Actions:     []SurvivalAction{action},
@@ -104,7 +142,10 @@ func (m *StubModule) Replay(pack EvidencePack) (bool, error) {
 		return false, ErrMalformedInput
 	}
 	action := pack.Actions[0]
-	expected := canonicalHash(action.Step, "stub-context", action.Payload, []byte("ok"))
+	expected, err := canonicalHash(action.Step, action.Payload, []byte("ok"), "stub-context")
+	if err != nil {
+		return false, ErrMalformedInput
+	}
 	if expected != pack.OutcomeHash || string(pack.Chain) != pack.OutcomeHash {
 		return false, ErrTampered
 	}
