@@ -24,12 +24,13 @@ var (
 
 // envelope is the single object hashed for tamper evidence.
 // v and domain allow future scheme changes without silent breakage.
+// context is a JSON object so the type is identical across languages.
 type envelope struct {
 	V       int             `json:"v"`
 	Domain  string          `json:"domain"`
 	Step    string          `json:"step"`
 	Input   json.RawMessage `json:"input"`
-	Context string          `json:"context"`
+	Context json.RawMessage `json:"context"`
 	Outcome json.RawMessage `json:"outcome"`
 }
 
@@ -51,6 +52,20 @@ func NewStub() *StubModule {
 	return &StubModule{Threshold: 0.8}
 }
 
+// checkIJSON rejects values that are not valid I-JSON (RFC 7493).
+// NaN, ±Inf, and integers outside the safe range (-2^53, 2^53) are rejected.
+func checkIJSON(v float64) error {
+	if math.IsNaN(v) || math.IsInf(v, 0) {
+		return ErrMalformedInput
+	}
+	// 2^53 = 9007199254740992; integers outside ±(2^53-1) are not exactly representable
+	// in IEEE 754 and must be rejected for cross-language determinism.
+	if v == math.Trunc(v) && (v > 9007199254740991 || v < -9007199254740991) {
+		return ErrMalformedInput
+	}
+	return nil
+}
+
 func (m *StubModule) Assess(signal CollapseSignal) (SurvivalAction, error) {
 	if m.assessed {
 		return SurvivalAction{}, ErrOutOfOrder
@@ -61,10 +76,9 @@ func (m *StubModule) Assess(signal CollapseSignal) (SurvivalAction, error) {
 	if m.Threshold == 0 {
 		return SurvivalAction{}, ErrMissingConfig
 	}
-	// Reject non-I-JSON numbers at the boundary.
 	for _, v := range signal.Metrics {
-		if math.IsNaN(v) || math.IsInf(v, 0) {
-			return SurvivalAction{}, ErrMalformedInput
+		if err := checkIJSON(v); err != nil {
+			return SurvivalAction{}, err
 		}
 	}
 
@@ -91,13 +105,13 @@ func (m *StubModule) Assess(signal CollapseSignal) (SurvivalAction, error) {
 	return action, nil
 }
 
-func canonicalHash(step string, input, outcome []byte, context string) (string, error) {
+func canonicalHash(step string, input, outcome []byte, contextObj []byte) (string, error) {
 	env := envelope{
 		V:       envelopeV,
 		Domain:  envelopeDomain,
 		Step:    step,
 		Input:   json.RawMessage(input),
-		Context: context,
+		Context: json.RawMessage(contextObj),
 		Outcome: json.RawMessage(outcome),
 	}
 	raw, err := json.Marshal(env)
@@ -120,7 +134,9 @@ func (m *StubModule) Record(action SurvivalAction, outcome []byte) (EvidencePack
 		return EvidencePack{}, ErrMalformedInput
 	}
 
-	hash, err := canonicalHash(action.Step, action.Payload, outcome, "stub-context")
+	// Context is a JSON object for cross-language type agreement.
+	ctx := []byte(`{"ctx":"stub-context"}`)
+	hash, err := canonicalHash(action.Step, action.Payload, outcome, ctx)
 	if err != nil {
 		return EvidencePack{}, ErrMalformedInput
 	}
@@ -142,7 +158,8 @@ func (m *StubModule) Replay(pack EvidencePack) (bool, error) {
 		return false, ErrMalformedInput
 	}
 	action := pack.Actions[0]
-	expected, err := canonicalHash(action.Step, action.Payload, []byte("ok"), "stub-context")
+	ctx := []byte(`{"ctx":"stub-context"}`)
+	expected, err := canonicalHash(action.Step, action.Payload, []byte("ok"), ctx)
 	if err != nil {
 		return false, ErrMalformedInput
 	}
