@@ -17,8 +17,32 @@
     "expected_error": "out of order: required prior step missing"
   },
   {
+    "name": "forced-sequence-assess-twice",
+    "description": "Second Assess after first must fail with ErrOutOfOrder",
+    "input": {
+      "signal": {
+        "timestamp": "2026-11-22T16:00:00Z",
+        "metrics": {"load": 0.3},
+        "context_hash": "fixed-ctx"
+      }
+    },
+    "expected_error": "out of order: required prior step missing"
+  },
+  {
+    "name": "forced-sequence-replay-after-failed-record",
+    "description": "Replay after a failed Record must fail",
+    "input": {
+      "signal": {
+        "timestamp": "2026-11-22T16:00:00Z",
+        "metrics": {"load": 0.3},
+        "context_hash": "fixed-ctx"
+      }
+    },
+    "expected_error": "out of order: required prior step missing"
+  },
+  {
     "name": "replay-determinism",
-    "description": "Same recorded input yields byte-identical result",
+    "description": "Same recorded input yields byte-identical result; hash pinned",
     "input": {
       "signal": {
         "timestamp": "2026-11-22T16:00:00Z",
@@ -29,7 +53,7 @@
     },
     "expected": {
       "step": "ACT",
-      "deterministic": true
+      "outcome_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     }
   },
   {
@@ -58,7 +82,7 @@
   },
   {
     "name": "boundary-missing-config",
-    "description": "Missing configuration (zero threshold) fails closed",
+    "description": "Zero threshold means missing config (document: zero is never legitimate)",
     "input": {
       "signal": {
         "timestamp": "2026-11-22T16:00:00Z",
@@ -71,7 +95,7 @@
   },
   {
     "name": "tamper-modified-outcome-hash",
-    "description": "Modified record makes Replay fail",
+    "description": "Modified outcome hash makes Replay fail",
     "input": {
       "signal": {
         "timestamp": "2026-11-22T16:00:00Z",
@@ -79,7 +103,49 @@
         "context_hash": "ctx"
       },
       "outcome": "ok",
-      "tamper": true
+      "tamper": "outcome_hash"
+    },
+    "expected_error": "tampered record"
+  },
+  {
+    "name": "tamper-modified-context",
+    "description": "Modified context after Record makes Replay fail",
+    "input": {
+      "signal": {
+        "timestamp": "2026-11-22T16:00:00Z",
+        "metrics": {"load": 0.3},
+        "context_hash": "ctx"
+      },
+      "outcome": "ok",
+      "tamper": "context"
+    },
+    "expected_error": "tampered record"
+  },
+  {
+    "name": "tamper-truncated-chain",
+    "description": "Truncated chain makes Replay fail",
+    "input": {
+      "signal": {
+        "timestamp": "2026-11-22T16:00:00Z",
+        "metrics": {"load": 0.3},
+        "context_hash": "ctx"
+      },
+      "outcome": "ok",
+      "tamper": "truncate"
+    },
+    "expected_error": "tampered record"
+  },
+  {
+    "name": "tamper-dropped-field",
+    "description": "Dropped field makes Replay fail",
+    "input": {
+      "signal": {
+        "timestamp": "2026-11-22T16:00:00Z",
+        "metrics": {"load": 0.3},
+        "context_hash": "ctx"
+      },
+      "outcome": "ok",
+      "tamper": "drop"
     },
     "expected_error": "tampered record"
   }
