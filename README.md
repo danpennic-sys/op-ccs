@@ -6,7 +6,7 @@ Deterministic. Evidence-producing. Forced reduction sequence once load threshold
 
 **PROOF NOT PROMISE.**
 
-**License:** MIT OR Apache-2.0 (dual). See [LICENSE](LICENSE).
+**License:** MIT OR Apache-2.0. See [LICENSE-MIT](LICENSE-MIT) and [LICENSE-APACHE](LICENSE-APACHE).
 
 ## Purpose
 
@@ -26,13 +26,21 @@ See `module.go` for the locked contract.
 
 ## Status
 
-Skeleton with test vectors.
+Skeleton with pinned test vectors.
 
-- `impl.go`: minimal StubModule (threshold hard-coded for tests only)
-- `module_test.go`: below-threshold pass-through, above-threshold ABORT, determinism check
+- `impl.go`: minimal StubModule with defined errors for order, boundary, and tamper cases
+- `testdata/vectors.json`: abstract vectors (no thresholds or metric definitions exposed)
+- `module_test.go`: table-driven tests covering forced sequence, replay determinism, boundary fail-closed, and tamper
 
 Thresholds and metric definitions must become versioned configuration before any production use.
 
 ```bash
 go test ./...
+```
+
+License check (Go):
+
+```bash
+go-licenses check ./...
+go-licenses report ./...
 ```
