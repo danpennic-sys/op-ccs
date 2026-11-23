@@ -26,11 +26,29 @@ See `module.go` for the locked contract.
 
 ## Hash design (tamper-evident)
 
-The outcome hash covers **step | context | input-payload | outcome** (canonical, sorted parts, no wall-clock, no map iteration order).
+The outcome hash is SHA-256 (lowercase hex) over the **JCS-canonical** form (RFC 8785) of a single envelope:
 
-Input is included so that a mutation to the recorded input after Record is detected by Replay as `ErrTampered`. This is the stronger option for a tamper-evident contract.
+```json
+{
+  "v": 1,
+  "domain": "op-ccs/v1",
+  "step": "...",
+  "input": <payload bytes as JSON>,
+  "context": "...",
+  "outcome": <outcome bytes as JSON>
+}
+```
 
-Baseline metrics use `float64` (JSON number / IEEE 754). Other implementations must use the same encoding or the hash will differ. Fixed-point or string metrics are preferred for cross-language reuse in production.
+Pipeline: marshal envelope → `jcs.Transform` → SHA-256.
+
+- Input is included, so `mutate_input` after Record produces `ErrTampered`.
+- `v` and fixed `domain` allow future scheme changes without silent breakage.
+- Non-I-JSON values (NaN, Inf, integers beyond 2^53) are rejected as `ErrMalformedInput`.
+- Library: `github.com/gowebpki/jcs` (Apache-2.0). CI `go-licenses` is the authority.
+
+**Limit:** A plain hash provides integrity, not authenticity. Anyone who can edit a record can also recompute a matching hash. The current vectors cover accidental corruption and detectable edits, not an adversary with write access. For authenticity against a hostile party, sign the hash (Ed25519) or use an HMAC with a key held outside the record.
+
+Baseline metrics use `float64`. JCS number serialization is deterministic across compliant implementations.
 
 ## Status
 
