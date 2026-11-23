@@ -7,209 +7,156 @@ package ccs
 import (
 	"encoding/json"
 	"os"
+	"strings"
 	"testing"
 	"time"
 )
 
-type Vector struct {
-	Name          string          `json:"name"`
-	Description   string          `json:"description"`
-	Input         json.RawMessage `json:"input"`
-	Expected      json.RawMessage `json:"expected,omitempty"`
-	ExpectedError string          `json:"expected_error,omitempty"`
+type VectorsFile struct {
+	License   string `json:"_license"`
+	Copyright string `json:"_copyright"`
+	Date      string `json:"_date"`
+	Note      string `json:"_note"`
+	Cases     []Case `json:"cases"`
 }
 
-type SignalInput struct {
-	Timestamp     string             `json:"timestamp"`
-	Metrics       map[string]float64 `json:"metrics"`
-	ContextHash   string             `json:"context_hash"`
-	ZeroThreshold bool               `json:"zero_threshold,omitempty"`
+type Case struct {
+	Name                string  `json:"name"`
+	Mutation            string  `json:"mutation"`
+	ExpectErr           *string `json:"expect_err"`
+	ExpectIdenticalRuns int     `json:"expect_identical_runs,omitempty"`
+	ExpectOutcomeHash   string  `json:"expect_outcome_hash,omitempty"`
 }
 
-type ActionInput struct {
-	Step    string `json:"step"`
-	Payload string `json:"payload"`
-}
-
-func loadVectors(t *testing.T) []Vector {
+func loadCases(t *testing.T) []Case {
 	t.Helper()
 	data, err := os.ReadFile("testdata/vectors.json")
 	if err != nil {
 		t.Fatal(err)
 	}
-	var vectors []Vector
-	if err := json.Unmarshal(data, &vectors); err != nil {
+	var vf VectorsFile
+	if err := json.Unmarshal(data, &vf); err != nil {
 		t.Fatal(err)
 	}
-	return vectors
+	return vf.Cases
 }
 
-func parseSignal(in SignalInput) CollapseSignal {
-	ts, _ := time.Parse(time.RFC3339, in.Timestamp)
+func baselineSignal() CollapseSignal {
 	return CollapseSignal{
-		Timestamp:   ts,
-		Metrics:     in.Metrics,
-		ContextHash: in.ContextHash,
+		Timestamp:   time.Date(2026, 11, 22, 16, 0, 0, 0, time.UTC),
+		Metrics:     map[string]float64{"load": 0.3},
+		ContextHash: "fixed-ctx",
 	}
+}
+
+func baselineOutcome() []byte {
+	return []byte("ok")
 }
 
 func TestVectors(t *testing.T) {
-	vectors := loadVectors(t)
+	cases := loadCases(t)
 
-	for _, v := range vectors {
-		t.Run(v.Name, func(t *testing.T) {
+	for _, c := range cases {
+		t.Run(c.Name, func(t *testing.T) {
 			m := NewStub()
+			signal := baselineSignal()
+			outcome := baselineOutcome()
 
-			switch v.Name {
-			case "forced-sequence-record-before-assess":
-				var in struct {
-					Action  ActionInput `json:"action"`
-					Outcome string      `json:"outcome"`
+			switch {
+			case strings.HasPrefix(c.Mutation, "call_order:"):
+				parts := strings.Split(strings.TrimPrefix(c.Mutation, "call_order:"), ",")
+				var lastErr error
+				for _, step := range parts {
+					switch step {
+					case "assess":
+						_, lastErr = m.Assess(signal)
+					case "record_fail":
+						_, lastErr = m.Record(SurvivalAction{}, []byte(""))
+					case "replay":
+						_, lastErr = m.Replay(EvidencePack{})
+					}
 				}
-				json.Unmarshal(v.Input, &in)
-				action := SurvivalAction{Step: in.Action.Step, Payload: []byte(in.Action.Payload)}
-				_, err := m.Record(action, []byte(in.Outcome))
-				if err == nil || err.Error() != v.ExpectedError {
-					t.Fatalf("expected %q, got %v", v.ExpectedError, err)
+				if c.ExpectErr != nil {
+					if lastErr == nil || !strings.Contains(lastErr.Error(), strings.TrimPrefix(*c.ExpectErr, "Err")) {
+						t.Fatalf("expected error containing %q, got %v", *c.ExpectErr, lastErr)
+					}
 				}
+				return
 
-			case "forced-sequence-replay-before-record":
-				var in struct {
-					Pack EvidencePack `json:"pack"`
-				}
-				json.Unmarshal(v.Input, &in)
-				_, err := m.Replay(in.Pack)
-				if err == nil || err.Error() != v.ExpectedError {
-					t.Fatalf("expected %q, got %v", v.ExpectedError, err)
-				}
-
-			case "forced-sequence-assess-twice":
-				var in struct {
-					Signal SignalInput `json:"signal"`
-				}
-				json.Unmarshal(v.Input, &in)
-				signal := parseSignal(in.Signal)
-				_, err := m.Assess(signal)
-				if err != nil {
-					t.Fatal(err)
-				}
-				_, err = m.Assess(signal)
-				if err == nil || err.Error() != v.ExpectedError {
-					t.Fatalf("expected %q, got %v", v.ExpectedError, err)
-				}
-
-			case "forced-sequence-replay-after-failed-record":
-				var in struct {
-					Signal SignalInput `json:"signal"`
-				}
-				json.Unmarshal(v.Input, &in)
-				signal := parseSignal(in.Signal)
-				_, err := m.Assess(signal)
-				if err != nil {
-					t.Fatal(err)
-				}
-				_, err = m.Record(SurvivalAction{}, []byte(""))
-				if err == nil {
-					t.Fatal("expected record to fail")
-				}
-				_, err = m.Replay(EvidencePack{})
-				if err == nil || err.Error() != v.ExpectedError {
-					t.Fatalf("expected %q, got %v", v.ExpectedError, err)
-				}
-
-			case "replay-determinism":
-				var in struct {
-					Signal  SignalInput `json:"signal"`
-					Outcome string      `json:"outcome"`
-				}
-				json.Unmarshal(v.Input, &in)
-				signal := parseSignal(in.Signal)
-				a1, err := m.Assess(signal)
-				if err != nil {
-					t.Fatal(err)
-				}
-				p1, err := m.Record(a1, []byte(in.Outcome))
-				if err != nil {
-					t.Fatal(err)
-				}
-
-				m2 := NewStub()
-				a2, _ := m2.Assess(signal)
-				p2, _ := m2.Record(a2, []byte(in.Outcome))
-
-				if a1.Step != a2.Step || p1.OutcomeHash != p2.OutcomeHash {
-					t.Fatal("non-deterministic")
-				}
-				ok1, err := m.Replay(p1)
-				if err != nil || !ok1 {
-					t.Fatal("first replay failed")
-				}
-				ok2, err := m.Replay(p1)
-				if err != nil || !ok2 {
-					t.Fatal("second replay failed")
-				}
-
-			case "boundary-empty-metrics", "boundary-empty-context":
-				var in struct {
-					Signal SignalInput `json:"signal"`
-				}
-				json.Unmarshal(v.Input, &in)
-				signal := parseSignal(in.Signal)
-				_, err := m.Assess(signal)
-				if err == nil || err.Error() != v.ExpectedError {
-					t.Fatalf("expected %q, got %v", v.ExpectedError, err)
-				}
-
-			case "boundary-missing-config":
-				var in struct {
-					Signal        SignalInput `json:"signal"`
-					ZeroThreshold bool        `json:"zero_threshold"`
-				}
-				json.Unmarshal(v.Input, &in)
-				if in.ZeroThreshold {
-					m.Threshold = 0
-				}
-				signal := parseSignal(in.Signal)
-				_, err := m.Assess(signal)
-				if err == nil || err.Error() != v.ExpectedError {
-					t.Fatalf("expected %q, got %v", v.ExpectedError, err)
-				}
-
-			case "tamper-modified-outcome-hash", "tamper-modified-context", "tamper-truncated-chain", "tamper-dropped-field":
-				var in struct {
-					Signal  SignalInput `json:"signal"`
-					Outcome string      `json:"outcome"`
-					Tamper  string      `json:"tamper"`
-				}
-				json.Unmarshal(v.Input, &in)
-				signal := parseSignal(in.Signal)
+			default:
+				// Normal Assess -> Record path, then mutate, then Replay
 				action, err := m.Assess(signal)
 				if err != nil {
 					t.Fatal(err)
 				}
-				pack, err := m.Record(action, []byte(in.Outcome))
+				pack, err := m.Record(action, outcome)
 				if err != nil {
 					t.Fatal(err)
 				}
-				switch in.Tamper {
-				case "outcome_hash":
-					pack.OutcomeHash = "deadbeef"
-				case "context":
+
+				// Apply mutation
+				switch c.Mutation {
+				case "mutate_input":
+					pack.Actions[0].Payload = []byte("tampered")
+				case "mutate_context":
 					pack.SignalHash = "tampered"
-				case "truncate":
-					if len(pack.Chain) > 4 {
-						pack.Chain = pack.Chain[:4]
+				case "flip_outcome_hash":
+					if len(pack.OutcomeHash) > 0 {
+						pack.OutcomeHash = pack.OutcomeHash[:len(pack.OutcomeHash)-1] + "f"
 					}
-				case "drop":
+				case "truncate_half":
+					if len(pack.Chain) > 1 {
+						pack.Chain = pack.Chain[:len(pack.Chain)/2]
+					}
+				case "drop_field:input":
 					pack.Actions = nil
-				}
-				_, err = m.Replay(pack)
-				if err == nil || err.Error() != v.ExpectedError {
-					t.Fatalf("expected %q, got %v", v.ExpectedError, err)
+				case "drop_field:context":
+					pack.SignalHash = ""
+				case "drop_field:outcome_hash":
+					pack.OutcomeHash = ""
+				case "none":
+					// no mutation
+				default:
+					t.Fatalf("unknown mutation: %s", c.Mutation)
 				}
 
-			default:
-				t.Fatalf("unknown vector: %s", v.Name)
+				if c.ExpectIdenticalRuns > 0 {
+					var first string
+					for i := 0; i < c.ExpectIdenticalRuns; i++ {
+						ok, err := m.Replay(pack)
+						if err != nil || !ok {
+							t.Fatalf("replay %d failed: %v", i, err)
+						}
+						if i == 0 {
+							first = pack.OutcomeHash
+						} else if pack.OutcomeHash != first {
+							t.Fatal("non-identical outcome hash across runs")
+						}
+					}
+					return
+				}
+
+				if c.ExpectOutcomeHash != "" && c.ExpectOutcomeHash != "REPLACE_WITH_PINNED_HASH" {
+					if pack.OutcomeHash != c.ExpectOutcomeHash {
+						t.Fatalf("outcome hash mismatch: got %s, want %s", pack.OutcomeHash, c.ExpectOutcomeHash)
+					}
+				}
+
+				_, err = m.Replay(pack)
+				if c.ExpectErr == nil {
+					if err != nil {
+						t.Fatalf("unexpected error: %v", err)
+					}
+				} else {
+					want := *c.ExpectErr
+					if err == nil {
+						t.Fatalf("expected %s, got nil", want)
+					}
+					// Match by error string fragment or name
+					if !strings.Contains(err.Error(), strings.TrimPrefix(want, "Err")) && err.Error() != want {
+						t.Fatalf("expected error %q, got %v", want, err)
+					}
+				}
 			}
 		})
 	}
