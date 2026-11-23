@@ -24,14 +24,22 @@ SEE step definition and Field Manual / Field Card lock: [`docs/SEE-PROTOCOL.md`]
 
 See `module.go` for the locked contract.
 
+## Hash design (tamper-evident)
+
+The outcome hash covers **step | context | input-payload | outcome** (canonical, sorted parts, no wall-clock, no map iteration order).
+
+Input is included so that a mutation to the recorded input after Record is detected by Replay as `ErrTampered`. This is the stronger option for a tamper-evident contract.
+
+Baseline metrics use `float64` (JSON number / IEEE 754). Other implementations must use the same encoding or the hash will differ. Fixed-point or string metrics are preferred for cross-language reuse in production.
+
 ## Status
 
 Skeleton with pinned test vectors.
 
-- `impl.go`: minimal StubModule. Zero threshold means missing config (never legitimate). Hash is canonical (sorted keys, no wall-clock or map order in digest). ActionID fixed for determinism in vectors.
-- `testdata/vectors.json`: abstract vectors covering forced sequence (including Assess twice and Replay after failed Record), replay determinism (double Replay), boundary fail-closed, and expanded tamper (hash, context, truncate, drop).
-- `module_test.go`: table-driven tests from the JSON.
-- `.github/workflows/ci.yml`: vet, race tests, go-licenses.
+- `impl.go`: minimal StubModule. Zero threshold means missing config (never legitimate). ActionID fixed for determinism in vectors.
+- `testdata/vectors.json`: abstract vectors covering forced sequence, replay determinism, boundary fail-closed, and expanded tamper.
+- `module_test.go`: table-driven tests from the JSON. Uses `errors.Is` against sentinels. Fails loudly if the pinned hash placeholder remains.
+- `.github/workflows/ci.yml`: vet, race tests (-count=100), go-licenses.
 
 Thresholds and metric definitions must become versioned configuration before any production use.
 
