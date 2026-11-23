@@ -20,10 +20,10 @@ type Vector struct {
 }
 
 type SignalInput struct {
-	Timestamp    string             `json:"timestamp"`
-	Metrics      map[string]float64 `json:"metrics"`
-	ContextHash  string             `json:"context_hash"`
-	ZeroThreshold bool              `json:"zero_threshold,omitempty"`
+	Timestamp     string             `json:"timestamp"`
+	Metrics       map[string]float64 `json:"metrics"`
+	ContextHash   string             `json:"context_hash"`
+	ZeroThreshold bool               `json:"zero_threshold,omitempty"`
 }
 
 type ActionInput struct {
@@ -42,6 +42,15 @@ func loadVectors(t *testing.T) []Vector {
 		t.Fatal(err)
 	}
 	return vectors
+}
+
+func parseSignal(in SignalInput) CollapseSignal {
+	ts, _ := time.Parse(time.RFC3339, in.Timestamp)
+	return CollapseSignal{
+		Timestamp:   ts,
+		Metrics:     in.Metrics,
+		ContextHash: in.ContextHash,
+	}
 }
 
 func TestVectors(t *testing.T) {
@@ -74,18 +83,47 @@ func TestVectors(t *testing.T) {
 					t.Fatalf("expected %q, got %v", v.ExpectedError, err)
 				}
 
+			case "forced-sequence-assess-twice":
+				var in struct {
+					Signal SignalInput `json:"signal"`
+				}
+				json.Unmarshal(v.Input, &in)
+				signal := parseSignal(in.Signal)
+				_, err := m.Assess(signal)
+				if err != nil {
+					t.Fatal(err)
+				}
+				_, err = m.Assess(signal)
+				if err == nil || err.Error() != v.ExpectedError {
+					t.Fatalf("expected %q, got %v", v.ExpectedError, err)
+				}
+
+			case "forced-sequence-replay-after-failed-record":
+				var in struct {
+					Signal SignalInput `json:"signal"`
+				}
+				json.Unmarshal(v.Input, &in)
+				signal := parseSignal(in.Signal)
+				_, err := m.Assess(signal)
+				if err != nil {
+					t.Fatal(err)
+				}
+				_, err = m.Record(SurvivalAction{}, []byte(""))
+				if err == nil {
+					t.Fatal("expected record to fail")
+				}
+				_, err = m.Replay(EvidencePack{})
+				if err == nil || err.Error() != v.ExpectedError {
+					t.Fatalf("expected %q, got %v", v.ExpectedError, err)
+				}
+
 			case "replay-determinism":
 				var in struct {
 					Signal  SignalInput `json:"signal"`
 					Outcome string      `json:"outcome"`
 				}
 				json.Unmarshal(v.Input, &in)
-				ts, _ := time.Parse(time.RFC3339, in.Signal.Timestamp)
-				signal := CollapseSignal{
-					Timestamp:   ts,
-					Metrics:     in.Signal.Metrics,
-					ContextHash: in.Signal.ContextHash,
-				}
+				signal := parseSignal(in.Signal)
 				a1, err := m.Assess(signal)
 				if err != nil {
 					t.Fatal(err)
@@ -102,9 +140,13 @@ func TestVectors(t *testing.T) {
 				if a1.Step != a2.Step || p1.OutcomeHash != p2.OutcomeHash {
 					t.Fatal("non-deterministic")
 				}
-				ok, err := m.Replay(p1)
-				if err != nil || !ok {
-					t.Fatal("replay failed")
+				ok1, err := m.Replay(p1)
+				if err != nil || !ok1 {
+					t.Fatal("first replay failed")
+				}
+				ok2, err := m.Replay(p1)
+				if err != nil || !ok2 {
+					t.Fatal("second replay failed")
 				}
 
 			case "boundary-empty-metrics", "boundary-empty-context":
@@ -112,12 +154,7 @@ func TestVectors(t *testing.T) {
 					Signal SignalInput `json:"signal"`
 				}
 				json.Unmarshal(v.Input, &in)
-				ts, _ := time.Parse(time.RFC3339, in.Signal.Timestamp)
-				signal := CollapseSignal{
-					Timestamp:   ts,
-					Metrics:     in.Signal.Metrics,
-					ContextHash: in.Signal.ContextHash,
-				}
+				signal := parseSignal(in.Signal)
 				_, err := m.Assess(signal)
 				if err == nil || err.Error() != v.ExpectedError {
 					t.Fatalf("expected %q, got %v", v.ExpectedError, err)
@@ -132,30 +169,20 @@ func TestVectors(t *testing.T) {
 				if in.ZeroThreshold {
 					m.Threshold = 0
 				}
-				ts, _ := time.Parse(time.RFC3339, in.Signal.Timestamp)
-				signal := CollapseSignal{
-					Timestamp:   ts,
-					Metrics:     in.Signal.Metrics,
-					ContextHash: in.Signal.ContextHash,
-				}
+				signal := parseSignal(in.Signal)
 				_, err := m.Assess(signal)
 				if err == nil || err.Error() != v.ExpectedError {
 					t.Fatalf("expected %q, got %v", v.ExpectedError, err)
 				}
 
-			case "tamper-modified-outcome-hash":
+			case "tamper-modified-outcome-hash", "tamper-modified-context", "tamper-truncated-chain", "tamper-dropped-field":
 				var in struct {
 					Signal  SignalInput `json:"signal"`
 					Outcome string      `json:"outcome"`
-					Tamper  bool        `json:"tamper"`
+					Tamper  string      `json:"tamper"`
 				}
 				json.Unmarshal(v.Input, &in)
-				ts, _ := time.Parse(time.RFC3339, in.Signal.Timestamp)
-				signal := CollapseSignal{
-					Timestamp:   ts,
-					Metrics:     in.Signal.Metrics,
-					ContextHash: in.Signal.ContextHash,
-				}
+				signal := parseSignal(in.Signal)
 				action, err := m.Assess(signal)
 				if err != nil {
 					t.Fatal(err)
@@ -164,8 +191,17 @@ func TestVectors(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if in.Tamper {
+				switch in.Tamper {
+				case "outcome_hash":
 					pack.OutcomeHash = "deadbeef"
+				case "context":
+					pack.SignalHash = "tampered"
+				case "truncate":
+					if len(pack.Chain) > 4 {
+						pack.Chain = pack.Chain[:4]
+					}
+				case "drop":
+					pack.Actions = nil
 				}
 				_, err = m.Replay(pack)
 				if err == nil || err.Error() != v.ExpectedError {
