@@ -14,6 +14,6 @@
     {"name": "assess_called_twice",         "mutation": "call_order:assess,assess", "expect_err": "ErrOutOfOrder"},
     {"name": "replay_after_failed_record",  "mutation": "call_order:assess,record_fail,replay", "expect_err": "ErrOutOfOrder"},
     {"name": "replay_twice_identical",      "mutation": "none", "expect_err": null, "expect_identical_runs": 2},
-    {"name": "replay_matches_pinned_hash",  "mutation": "none", "expect_err": null, "expect_outcome_hash": "REPLACE_WITH_PINNED_HASH"}
+    {"name": "replay_matches_pinned_hash",  "mutation": "none", "expect_err": null, "expect_outcome_hash": "6298995079938d6c9b3b61b327906791a944a01ee679a1353acef4123073e470"}
   ]
 }

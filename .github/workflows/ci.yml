@@ -19,7 +19,9 @@ jobs:
         with:
           go-version-file: go.mod
       - name: Vet
-        run: go vet ./...
+        run: |
+          go mod verify
+          go vet ./...
       - name: Test (race, repeated for determinism)
         run: go test -race -count=100 ./...
       - name: License check

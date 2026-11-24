@@ -11,6 +11,7 @@ import (
 	"errors"
 	"math"
 	"time"
+	"unicode/utf8"
 
 	"github.com/gowebpki/jcs"
 )
@@ -105,14 +106,28 @@ func (m *StubModule) Assess(signal CollapseSignal) (SurvivalAction, error) {
 	return action, nil
 }
 
+// canonicalHash is SHA-256 over the JCS form of the envelope.
+// input and outcome are JSON strings of the UTF-8 payload (not raw bytes, not base64).
+// contextObj must already be a JSON object.
 func canonicalHash(step string, input, outcome []byte, contextObj []byte) (string, error) {
+	in, err := jsonText(input)
+	if err != nil {
+		return "", err
+	}
+	out, err := jsonText(outcome)
+	if err != nil {
+		return "", err
+	}
+	if !json.Valid(contextObj) {
+		return "", errors.New("context is not valid JSON")
+	}
 	env := envelope{
 		V:       envelopeV,
 		Domain:  envelopeDomain,
 		Step:    step,
-		Input:   json.RawMessage(input),
+		Input:   in,
 		Context: json.RawMessage(contextObj),
-		Outcome: json.RawMessage(outcome),
+		Outcome: out,
 	}
 	raw, err := json.Marshal(env)
 	if err != nil {
@@ -124,6 +139,30 @@ func canonicalHash(step string, input, outcome []byte, contextObj []byte) (strin
 	}
 	h := sha256.Sum256(canon)
 	return hex.EncodeToString(h[:]), nil
+}
+
+func jsonText(b []byte) (json.RawMessage, error) {
+	if !utf8.Valid(b) {
+		return nil, errors.New("payload is not valid UTF-8")
+	}
+	raw, err := json.Marshal(string(b))
+	if err != nil {
+		return nil, err
+	}
+	return raw, nil
+}
+
+func isSHA256Hex(s string) bool {
+	if len(s) != sha256.Size*2 {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 func (m *StubModule) Record(action SurvivalAction, outcome []byte) (EvidencePack, error) {
@@ -154,16 +193,24 @@ func (m *StubModule) Replay(pack EvidencePack) (bool, error) {
 	if !m.recorded && len(pack.Actions) == 0 {
 		return false, ErrOutOfOrder
 	}
-	if len(pack.Actions) == 0 || pack.OutcomeHash == "" || len(pack.Chain) == 0 {
+	// Incomplete record (dropped field, empty chain, truncated hash) is malformed.
+	// A complete record that does not recompute is tampered.
+	if len(pack.Actions) == 0 || pack.SignalHash == "" || pack.OutcomeHash == "" || len(pack.Chain) == 0 {
+		return false, ErrMalformedInput
+	}
+	if !isSHA256Hex(pack.OutcomeHash) || !isSHA256Hex(string(pack.Chain)) {
 		return false, ErrMalformedInput
 	}
 	action := pack.Actions[0]
+	if action.Step == "" || len(action.Payload) == 0 {
+		return false, ErrMalformedInput
+	}
 	ctx := []byte(`{"ctx":"stub-context"}`)
 	expected, err := canonicalHash(action.Step, action.Payload, []byte("ok"), ctx)
 	if err != nil {
 		return false, ErrMalformedInput
 	}
-	if expected != pack.OutcomeHash || string(pack.Chain) != pack.OutcomeHash {
+	if expected != pack.OutcomeHash || string(pack.Chain) != pack.OutcomeHash || pack.SignalHash != "stub-signal" {
 		return false, ErrTampered
 	}
 	return true, nil

@@ -39,6 +39,7 @@ The outcome hash is SHA-256 (lowercase hex) over the **JCS-canonical** form (RFC
 }
 ```
 
+- `input` and `outcome` are JSON strings of the UTF-8 payload (not raw bytes, not base64).
 - `context` is a JSON **object** (not a string) so Go, Python, and other implementations agree on types.
 - Pipeline: marshal envelope → `jcs.Transform` → SHA-256.
 - Input is included, so `mutate_input` after Record produces `ErrTampered`.
@@ -48,7 +49,7 @@ The outcome hash is SHA-256 (lowercase hex) over the **JCS-canonical** form (RFC
 
 **Limit:** A plain hash provides integrity, not authenticity. Anyone who can edit a record can also recompute a matching hash. The current vectors cover accidental corruption and detectable edits, not an adversary with write access. For authenticity against a hostile party, sign the hash (Ed25519) or use an HMAC with a key held outside the record.
 
-Baseline metrics use `float64`. JCS number serialization is deterministic across compliant implementations. Cross-check with a second language (e.g. Python `rfc8785`) is required before pinning.
+Baseline metrics use `float64`. JCS number serialization is deterministic across compliant implementations. The pinned baseline hash was cross-checked against an independent Python canonical JSON digest for this ASCII envelope (same bytes as JCS).
 
 ## Status
 
