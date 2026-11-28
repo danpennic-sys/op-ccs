@@ -1,8 +1,8 @@
 {
   "_license": "MIT OR Apache-2.0",
   "_copyright": "Operator Pages LLC",
-  "_date": "2026-11-22",
-  "_note": "Abstract vectors only. No thresholds or metric definitions. Each case runs Assess -> Record on a valid baseline fixture, applies 'mutation' to the recorded artifact (or call order), then runs Replay.",
+  "_date": "2026-11-27",
+  "_note": "Abstract vectors. Config version and weights are bound into the hashed context. Each case runs Assess -> Record on a valid baseline fixture, applies 'mutation' to the recorded artifact (or call order), then runs Replay. Outcome hash re-pinned after binding config into context.",
   "cases": [
     {"name": "mutate_input_after_record",   "mutation": "mutate_input",        "expect_err": "ErrTampered"},
     {"name": "mutate_context_after_record", "mutation": "mutate_context",      "expect_err": "ErrTampered"},
@@ -14,6 +14,6 @@
     {"name": "assess_called_twice",         "mutation": "call_order:assess,assess", "expect_err": "ErrOutOfOrder"},
     {"name": "replay_after_failed_record",  "mutation": "call_order:assess,record_fail,replay", "expect_err": "ErrOutOfOrder"},
     {"name": "replay_twice_identical",      "mutation": "none", "expect_err": null, "expect_identical_runs": 2},
-    {"name": "replay_matches_pinned_hash",  "mutation": "none", "expect_err": null, "expect_outcome_hash": "6298995079938d6c9b3b61b327906791a944a01ee679a1353acef4123073e470"}
+    {"name": "replay_matches_pinned_hash",  "mutation": "none", "expect_err": null, "expect_outcome_hash": "3eda6326acecc3fed58223aa739077384a238d1f1901606a8634cf8724071ad1"}
   ]
 }
