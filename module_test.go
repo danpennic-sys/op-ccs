@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 // Copyright (c) 2026 Operator Pages LLC
-// Date: 2026-11-22
+// Date: 2026-11-27
 
 package ccs
 
@@ -29,7 +29,6 @@ type Case struct {
 	ExpectOutcomeHash   string  `json:"expect_outcome_hash,omitempty"`
 }
 
-// Sentinel map for exact errors.Is matching.
 var errSentinels = map[string]error{
 	"ErrOutOfOrder":     ErrOutOfOrder,
 	"ErrMalformedInput": ErrMalformedInput,
@@ -50,8 +49,6 @@ func loadCases(t *testing.T) []Case {
 	return vf.Cases
 }
 
-// Baseline uses float64. Documented encoding for other implementations:
-// JSON number 0.3 (IEEE 754 double). Hash is over canonical step|context|outcome bytes only.
 func baselineSignal() CollapseSignal {
 	return CollapseSignal{
 		Timestamp:   time.Date(2026, 11, 22, 16, 0, 0, 0, time.UTC),
@@ -62,6 +59,14 @@ func baselineSignal() CollapseSignal {
 
 func baselineOutcome() []byte {
 	return []byte("ok")
+}
+
+func baselineConfig() Config {
+	return Config{
+		Version:   ConfigV1,
+		Threshold: 0.8,
+		Metrics:   map[string]float64{"load": 1.0},
+	}
 }
 
 func checkErr(t *testing.T, got error, expect *string) {
@@ -87,7 +92,10 @@ func TestVectors(t *testing.T) {
 
 	for _, c := range cases {
 		t.Run(c.Name, func(t *testing.T) {
-			m := NewStub()
+			m := New()
+			if err := m.Configure(baselineConfig()); err != nil {
+				t.Fatal(err)
+			}
 			signal := baselineSignal()
 			outcome := baselineOutcome()
 
@@ -172,5 +180,54 @@ func TestVectors(t *testing.T) {
 				checkErr(t, err, c.ExpectErr)
 			}
 		})
+	}
+}
+
+// TestReplayFailsOnConfigMismatch ensures that replaying a pack recorded under
+// one config fails when the module is configured with a different version or weights.
+func TestReplayFailsOnConfigMismatch(t *testing.T) {
+	m := New()
+	if err := m.Configure(baselineConfig()); err != nil {
+		t.Fatal(err)
+	}
+	action, err := m.Assess(baselineSignal())
+	if err != nil {
+		t.Fatal(err)
+	}
+	pack, err := m.Record(action, baselineOutcome())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ok, err := m.Replay(pack)
+	if err != nil || !ok {
+		t.Fatalf("baseline replay failed: %v", err)
+	}
+
+	// Different weights
+	m2 := New()
+	badWeights := baselineConfig()
+	badWeights.Metrics = map[string]float64{"load": 2.0}
+	if err := m2.Configure(badWeights); err != nil {
+		t.Fatal(err)
+	}
+	// Force recorded state so Replay proceeds past the order check
+	m2.recorded = true
+	_, err = m2.Replay(pack)
+	if !errors.Is(err, ErrTampered) {
+		t.Fatalf("replay under different weights: got %v, want ErrTampered", err)
+	}
+
+	// Different version is rejected at Configure; the binding is via the context hash.
+	// A module with the same weights but we mutate the pack's implied config by using a different threshold.
+	m3 := New()
+	badThresh := baselineConfig()
+	badThresh.Threshold = 0.5
+	if err := m3.Configure(badThresh); err != nil {
+		t.Fatal(err)
+	}
+	m3.recorded = true
+	_, err = m3.Replay(pack)
+	if !errors.Is(err, ErrTampered) {
+		t.Fatalf("replay under different threshold: got %v, want ErrTampered", err)
 	}
 }
